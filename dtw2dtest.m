@@ -1,14 +1,24 @@
 clc;clear all;close all;
+%% Parameter
+% PDR height
+height = 1.62;
+% weight
+mag_w = 0.5;
+gyro_w = 0.5;
+% 取樣區間
+time_interval = 0.1;
+% 讀取地磁基準網格圖
+magnetmap = csvread('0121Line_GRID_mean.csv');
+
 if ~exist('dirName','var')
     dirName='C:\Users\a5609\Desktop';
 elseif dirName==0
     dirName='C:\Users\a5609\Desktop';
 end
 addpath functions\;
-%% 取樣區間
-time_interval = 0.1;
-%% 讀取地磁基準網格圖
-magnetmap = csvread('1210Line_GRID_mean.csv');
+indicator = [];
+indicator2 = [];
+
 %% 設定網格座標
 %長寬
 X=7;
@@ -81,8 +91,8 @@ acc(:,3)=smoothdata(acc(:,3),'movmedian',0.1/(time_interval)*2);%移動平均
 for i = 1:size(acc,1)
     mag(i,1) = sqrt(acc(i,1)^2+acc(i,2)^2+acc(i,3)^2)-sqrt(gra(i,1)^2+gra(i,2)^2+gra(i,3)^2);
 end
-[pks,locs] = findpeaks(mag,'MINPEAKHEIGHT',0.5,'MINPEAKDISTANCE',0.1/(time_interval)*3);
-[pks2,locs2] = findpeaks(-mag,'MINPEAKHEIGHT',0.5,'MINPEAKDISTANCE',0.1/(time_interval)*3);
+[pks,locs] = findpeaks(mag,'MINPEAKHEIGHT',0.4,'MINPEAKDISTANCE',0.1/(time_interval)*3);
+[pks2,locs2] = findpeaks(-mag,'MINPEAKHEIGHT',0.4,'MINPEAKDISTANCE',0.1/(time_interval)*3);
 % pks 對應峰值
 % locs 對應峰值位數
 % MINPEAKHEIGHT 峰值最小高度
@@ -125,10 +135,11 @@ locsfin=locsfin';
 % plot(locs2,-pks2,'b *');
 % plot(locs3,mag(locs3),'g *');
 % plot(locsfin,mag(locsfin),'k o');
-% legend('Acceleration','Crest','trough','zero','result');
+% legend('Acceleration','peak','valley','zero','result');
 % xlabel('Time series')
 % ylabel('Magnitude (m/s^2)')
-% title('The Magnitude of Acceleration ','FontWeight','bold','FontSize',10)
+% title('The Magnitude of Acceleration ','FontWeight','bold','FontSize',10);
+% set(gca,'FontWeight','bold','fontsize',26);
 fprintf('The total step are %d\n',size(locsfin,1))
 %% Step 2 : step length
 for i=2:size(locsfin,1)
@@ -137,8 +148,8 @@ end
 period=[(wave(2,2)-wave(1,2))*time_interval period];
 
 SF =1./period;
-H = 1.6;
-step = 0.7 + 0.371 * (H - 1.75) + 0.227 * ((SF - 1.79) * H / 1.75);
+
+step = 0.7 + 0.371 * (height - 1.75) + 0.227 * ((SF - 1.79) * height / 1.75);
 cdistance(1)=step(1);
 for i=2:size(locsfin,1)
     cdistance(i)=cdistance(i-1)+step(i);
@@ -165,13 +176,15 @@ start=0;
 GDAZ=[];
 MAGAZ=[];
 %起始點
-NG=0.5;
-EG=0.5;
+NG = 0.5;
+EG = 0.5;
 updatepoint=[EG NG];
+
 % NM = 0.5;
 % EM = 0.5;
 j=0;
 update=0;
+lastnnindex=1;
 updatelocsfin=1;
 clear coord_g
 for i = 2:1:size(mag,1)+1
@@ -189,32 +202,55 @@ for i = 2:1:size(mag,1)+1
         %         NM(i,1) = NM(i-1,1);
         %         EM(i,1) = EM(i-1,1);
     end
+    if EG(i,1) > 38
+        EG(i,1) = 38;
+    elseif EG(i,1) < 0
+        EG(i,1) = 0;
+    end
+    
+    if NG(i,1) > 7
+        NG(i,1) = 7;
+    elseif NG(i,1) < 0
+        NG(i,1) = 0;
+    end
+    
     if((i-update)==110)
         nnindex=find(i-locsfin(:)<=5);%最接近一步
-        sublocsfin=locsfin(1:nnindex(1));
+        sublocsfin=locsfin(lastnnindex:nnindex(1));
+        lastnnindex = nnindex(1);
+        lastsublocsfin = sublocsfin;
+        coord_g = [];
         for k=1:size(sublocsfin,1)-1
-            coord_g(k,:) = [EG(sublocsfin(k)) ,NG(sublocsfin(k))];
-            
+            coord_g(k,:) = [EG(sublocsfin(k)) ,NG(sublocsfin(k))];            
         end
-        %軌跡網格化
-%        [gridrelationship,magnetseries]=Rasterprocessing(F,X,Y,Gridsize,EG(locsfin(updatelocsfin):locsfin(size(sublocsfin,1))),NG(locsfin(updatelocsfin):locsfin(size(sublocsfin,1))),coord_g(updatelocsfin:size(sublocsfin,1)-1,:),sublocsfin(updatelocsfin:size(sublocsfin,1)));
-         [gridrelationship,magnetseries]=Rasterprocessing(F,X,Y,Gridsize,EG,NG,coord_g,sublocsfin,updatepoint);
-        %序列匹配
-        [location,location2,location3,location4,location5,location6] =Matching(magnetmap,magnetseries,gridrelationship,X,Y,Gridsize,coordinate);
-        %地磁扭曲補償與航向計算
-        [mag_az]=magnetheading(north_mag,sublocsfin,nnindex,location,coordinate,orientationmap);
-%         [mag_az]=magnetheading(north_mag,sublocsfin,nnindex,location4,coordinate,orientationmap);
-        %位置更新(最接近i的一步的時刻到i)
-         EG(locsfin(size(sublocsfin,1)):i) = location(1,size(location,2));
-         NG(locsfin(size(sublocsfin,1)):i) = location(2,size(location,2));
-         updatepoint=[updatepoint;location(1,size(location,2)) location(2,size(location,2))];
 
-%         EG(locsfin(size(sublocsfin,1)):i) = location4(1,size(location4,2));
-%         NG(locsfin(size(sublocsfin,1)):i) = location4(2,size(location4,2));
+        %軌跡網格化
+        %        [gridrelationship,sgtitle(str,'FontWeight','bold','fontsize',26);]=Rasterprocessing(F,X,Y,Gridsize,EG(locsfin(updatelocsfin):locsfin(size(sublocsfin,1))),NG(locsfin(updatelocsfin):locsfin(size(sublocsfin,1))),coord_g(updatelocsfin:size(sublocsfin,1)-1,:),sublocsfin(updatelocsfin:size(sublocsfin,1)));
+        [gridrelationship,magnetseries]=Rasterprocessing(F,X,Y,Gridsize,EG,NG,coord_g,sublocsfin,lastsublocsfin,updatepoint);
+        %序列匹配
+        [location,location2,location3,location4,location5,location6,indic, indic2] =Matching(magnetmap,magnetseries,gridrelationship,X,Y,Gridsize,coordinate);
+        %         [mag_az]=magnetheading(north_mag,sublocsfin,nnindex,location4,coordinate,orientationmap);
+        %位置更新(最接近i的一步的時刻到i)
+        updatepoint=[updatepoint;location(1,size(location,2)) location(2,size(location,2))];
+        if sqrt((updatepoint(end,1)-EG(end,1))^2+(updatepoint(end,2)-NG(end,1))^2) < 3
+            EG(locsfin(size(sublocsfin,1)):i) = location(1,size(location,2));
+            NG(locsfin(size(sublocsfin,1)):i) = location(2,size(location,2));
+            %地磁扭曲補償與航向計算
+            [mag_az]=magnetheading(north_mag,sublocsfin,nnindex,location,coordinate,orientationmap);
+        else
+            location(1,size(location,2)) = EG(end,1);
+            location(2,size(location,2)) = NG(end,1);
+            [mag_az]=magnetheading(north_mag,sublocsfin,nnindex,location,coordinate,orientationmap);
+  
+        end
+         %         indicator = [indicator, indic];
+        %         indicator2 = [indicator2, indic2];
+        %         EG(locsfin(size(sublocsfin,1)):i) = location4(1,size(location4,2));
+        %         NG(locsfin(size(sublocsfin,1)):i) = location4(2,size(location4,2));
         %航向更新
         %從i==100(最接近的一步)開始
         start=locsfin(size(sublocsfin,1));
-        g_d_az(start)=(mag_az*0.5+g_d_az(start)*0.5);
+        g_d_az(start)=(mag_az*mag_w+g_d_az(start)*gyro_w);
         [g_d_az]=gyroheading(gyro,time_interval,start,g_d_az);
         %更新時間點
         update=i;
@@ -226,8 +262,8 @@ end
 
 
 for k=1:size(locsfin,1)-1
-            coord_g(k,:) = [EG(locsfin(k)) ,NG(locsfin(k))];
-            %             coord_m(j,:) = [EM(sublocsfin(j)) ,NM(sublocsfin(j))];
+    coord_g(k,:) = [EG(locsfin(k)) ,NG(locsfin(k))];
+    %             coord_m(j,:) = [EM(sublocsfin(j)) ,NM(sublocsfin(j))];
 end
 
 %% original pdr
@@ -251,29 +287,45 @@ for i = 1:size(gyro,1)
         continue
     end
     
-    g_d_az2(i,1) = g_d2(i,1) + g_d_az2(i-1,1); 
+    g_d_az2(i,1) = g_d2(i,1) + g_d_az2(i-1,1);
 end
 NG2 = 0.5;
 EG2 = 0.5;
 j=0;
 for i = 2:1:size(mag,1)+1
     
- 
-        if i == locsfin(find(locsfin==i),1)
-            j=j+1;
-            NG2(i,1) = NG2(i-1,1) + step(j) * cosd(g_d_az2(i-1,1));
-            EG2(i,1) = EG2(i-1,1) + step(j) * sind(g_d_az2(i-1,1));
-        else
-            NG2(i,1) = NG2(i-1,1);
-            EG2(i,1) = EG2(i-1,1);
-        end
-
+    
+    if i == locsfin(find(locsfin==i),1)
+        j=j+1;
+        NG2(i,1) = NG2(i-1,1) + step(j) * cosd(g_d_az2(i-1,1));
+        EG2(i,1) = EG2(i-1,1) + step(j) * sind(g_d_az2(i-1,1));
+    else
+        NG2(i,1) = NG2(i-1,1);
+        EG2(i,1) = EG2(i-1,1);
+    end
+    
+    if EG2(i,1) > 38
+        EG2(i,1) = 38;
+    elseif EG2(i,1) < 0
+        EG2(i,1) = 0;
+    end
+    
+    if NG2(i,1) > 7
+        NG2(i,1) = 7;
+    elseif NG2(i,1) < 0
+        NG2(i,1) = 0;
+    end
+    
 end
 for i=1:size(locsfin,1)
     coord_g2(i,:) = [EG2(locsfin(i)) ,NG2(locsfin(i))];
 end
 %% fin
+
 [gridrelationship,magnetseries]=Rasterprocessing(F,X,Y,Gridsize,EG,NG,coord_g,locsfin,updatepoint);
 
 mapshow(coord_g2(:,1),coord_g2(:,2),'Marker','O','Color', 'g');
-legend('result','position update','originalPDR');
+xlabel('X(m)');ylabel('Y(m)');
+axis equal; xlim([-3 42]); ylim([-3.5 8]);
+legend('result','position update','original PDR');
+set(gca,'FontWeight','bold','fontsize',14)
